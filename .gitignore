@@ -1,0 +1,9 @@
+# Data never enters Git
+*.xlsx
+*.csv
+data/
+
+# Secrets
+.env
+*.env
+.pgpass
