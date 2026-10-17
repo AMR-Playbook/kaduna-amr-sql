@@ -1,5 +1,4 @@
-# Data never enters Git
-*.xlsx
+# Data: only the agreed seed workbook is tracked
 *.csv
 data/
 
