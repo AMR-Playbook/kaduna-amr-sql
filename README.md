@@ -73,9 +73,12 @@ sql/
   schema.sql     Builds the whole database from nothing
   load.sql       Staging, validation and insert
   views.sql      The reporting views every tool reads
+  roles.sql      Least-privilege analyst, loader and admin roles
+  test_roles.sql Checks that the roles cannot exceed their permissions
 docs/
   erd.md         Diagram and design decisions
   answer_key.md  The reference numbers every view must reproduce
+  privacy.md     Identifier check, hashing rules and NDPA checklist
 ```
 
 ---
