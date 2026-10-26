@@ -22,22 +22,32 @@
 -- Re-running is safe: roles are created if absent, passwords are reset, and
 -- grants are re-applied. The script never drops a role or any data.
 
+-- Stop at the first error so a failed run never looks like a success.
+\set ON_ERROR_STOP on
+
 \if :{?analyst_password}
 \else
-  \echo 'ERROR: missing psql variable analyst_password'
-  \quit
+  DO $$ BEGIN RAISE EXCEPTION 'missing psql variable analyst_password'; END $$;
 \endif
 
 \if :{?loader_password}
 \else
-  \echo 'ERROR: missing psql variable loader_password'
-  \quit
+  DO $$ BEGIN RAISE EXCEPTION 'missing psql variable loader_password'; END $$;
 \endif
 
 \if :{?admin_password}
 \else
-  \echo 'ERROR: missing psql variable admin_password'
-  \quit
+  DO $$ BEGIN RAISE EXCEPTION 'missing psql variable admin_password'; END $$;
+\endif
+
+-- On PostgreSQL 15 and earlier, a role with CREATEROLE can grant itself
+-- powerful built-in roles such as pg_execute_server_program, which makes
+-- amr_admin close to a superuser. PostgreSQL 16 closed that gap.
+SELECT current_setting('server_version_num')::int >= 160000 AS pg16_or_later \gset
+\if :pg16_or_later
+\else
+  \echo 'WARNING: PostgreSQL 15 or earlier. amr_admin has CREATEROLE, which on this version'
+  \echo 'WARNING: can escalate to near-superuser. Use PostgreSQL 16+ for real data.'
 \endif
 
 \if :{?database_name}

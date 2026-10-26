@@ -49,7 +49,7 @@ A pattern scan of the workbook's 19,182 unique text values found:
 - 0 NIN or BVN values.
 - 0 numeric cells containing 10 to 15 digit telephone-like values.
 
-The only match for "name" or "phone" was the data-dictionary note: *"Hashed patient ID. Never store a real name or phone number here."* That is guidance, not data.
+Text containing "name" or "phone" appears only in documentation strings, such as the data-dictionary note *"Hashed patient ID. Never store a real name or phone number here."* and descriptions like "Standardised organism name". These are guidance, not personal data.
 
 ### Residual risk
 
@@ -70,6 +70,10 @@ This check covers the synthetic workbook only. Real hospital data must pass the 
 | `amr_admin` | Database administrator and migrations | `CONNECT`; `CREATE` on `public`; all table and sequence privileges; `CREATEROLE` | `SUPERUSER`, `CREATEDB` |
 
 The admin role is not a superuser. A superuser is used only to bootstrap the database and run this roles script; day-to-day schema work should use `amr_admin`.
+
+**Use PostgreSQL 16 or later for real data.** On PostgreSQL 15 and earlier, a role with `CREATEROLE` can grant itself powerful built-in roles (for example `pg_execute_server_program`), which makes `amr_admin` close to a superuser. PostgreSQL 16 removed that path. `sql/roles.sql` prints a warning when it runs on an older version.
+
+If a password variable is missing, `sql/roles.sql` stops with an error and a non-zero exit code before changing anything.
 
 ### Passwords are not committed
 
@@ -108,20 +112,46 @@ The roles script removes the default `CREATE` privilege that older PostgreSQL ve
 
 ### Required test result
 
-After schema creation, run:
+After `sql/roles.sql` (and again after every schema change), run:
 
 ```bash
 psql -U postgres -d kaduna_amr -f sql/test_roles.sql
 ```
 
-Expected results:
+The test creates a scratch table as `amr_admin`, tries each operation as each role, then rolls everything back. It checks that:
 
-- `amr_analyst` can run `SELECT count(*) FROM isolates`.
-- `amr_analyst` gets `ERROR: permission denied for table isolates` on `DELETE` and `UPDATE`.
-- `amr_loader` can read and write rows but gets `ERROR: permission denied for schema public` when it tries to create a table.
-- The privilege summary shows `analyst_can_insert`, `analyst_can_update`, and `analyst_can_delete` as `f`; `loader_can_delete` as `f`.
+- `amr_analyst` can `SELECT`, and is denied `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE` and `CREATE TABLE`.
+- `amr_loader` can `SELECT`, `INSERT` and `UPDATE`, and is denied `DELETE`, `TRUNCATE`, `CREATE TABLE` and `ALTER TABLE`.
+- On every existing table and view in `public`, the analyst can only read and the loader cannot delete.
+- No `amr_*` role is a superuser or can create databases.
 
-If an error message differs, stop and fix the grants before connecting any reporting tool.
+Each check prints `PASS`. Any failure prints `FAIL`, stops, and exits with a non-zero code, so the test can run in CI. It works before `schema.sql` exists, and covers the real tables once it does.
+
+If anything fails, fix the grants before connecting any reporting tool.
+
+### Check the analyst login
+
+`test_roles.sql` uses `SET ROLE`, which proves the grants but not that the analyst can log in. Test the login itself as the analyst user:
+
+```bash
+psql "host=localhost dbname=kaduna_amr user=amr_analyst" \
+  -c "SELECT current_user" \
+  -c "DELETE FROM isolates"
+```
+
+The first command should print `amr_analyst`; the second must fail with `ERROR: permission denied for table isolates`. Paste that output on issue #9.
+
+From Python:
+
+```python
+import os
+import psycopg
+with psycopg.connect(host="localhost", dbname="kaduna_amr", user="amr_analyst",
+                     password=os.environ["AMR_ANALYST_PASSWORD"]) as conn:
+    print(conn.execute("SELECT current_user").fetchone())
+```
+
+In Power BI, use **Get Data → PostgreSQL database**, server `localhost`, database `kaduna_amr`, **Database** credentials with `amr_analyst`. If the login is refused, check `pg_hba.conf` allows password login for `amr_analyst` from that machine.
 
 ---
 
@@ -225,6 +255,9 @@ The NDPA also requires an appropriate lawful basis under section 25 and gives da
 - [x] Analyst is read-only and cannot `DELETE` or `UPDATE`.
 - [x] Loader can load rows but cannot change the schema.
 - [x] No password is committed to Git.
+- [x] `sql/test_roles.sql` passes and fails loudly if a grant is wrong.
+- [ ] Analyst login tested with `psql -U amr_analyst` and the `permission denied` output pasted on issue #9.
+- [ ] Python and Power BI connected with `amr_analyst` credentials.
 - [x] Seed workbook checked for names, telephone numbers, addresses, and government identifiers.
 - [x] Keyed-hash pseudonymisation and its limits are documented.
 - [x] NDPA 2023 principles that apply are listed with project-specific meaning.
